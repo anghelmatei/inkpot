@@ -22,6 +22,7 @@ class KOReaderAuthActivity final : public ActivityWithSubactivity {
   void onExit() override;
   void loop() override;
   bool preventAutoSleep() override { return state == CONNECTING || state == AUTHENTICATING; }
+  void requestScreenRefresh() override { updateRequired = true; }
 
  private:
   enum State { WIFI_SELECTION, CONNECTING, AUTHENTICATING, SUCCESS, FAILED };

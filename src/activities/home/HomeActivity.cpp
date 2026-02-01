@@ -313,7 +313,7 @@ void HomeActivity::render() {
 
   // --- Cover image area (no selection highlight, just displays the cover) ---
   const int coverWidth = pageWidth - 2 * margin;
-  const int coverHeight = pageHeight * 9 / 10;  // 90% of page height
+  const int coverHeight = pageHeight * 65 / 100;  // 65% of page height
   const int coverX = (pageWidth - coverWidth) / 2;
   constexpr int coverY = 6;  // Minimal top padding
 
@@ -492,7 +492,7 @@ void HomeActivity::render() {
     const bool selected = selectorIndex == static_cast<int>(i);
 
     if (selected) {
-      renderer.fillRect(tileX, tileY, menuTileWidth, menuTileHeight, !darkMode);
+      renderer.fillRect(tileX, tileY, menuTileWidth, menuTileHeight, darkMode);
     } else {
       renderer.drawRect(tileX, tileY, menuTileWidth, menuTileHeight, !darkMode);
     }
@@ -503,7 +503,7 @@ void HomeActivity::render() {
     const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
     const int textY = tileY + (menuTileHeight - lineHeight) / 2;
 
-    const bool textColor = selected ? darkMode : !darkMode;
+    const bool textColor = !darkMode;
     renderer.drawText(UI_10_FONT_ID, textX, textY, label.c_str(), textColor);
   }
 

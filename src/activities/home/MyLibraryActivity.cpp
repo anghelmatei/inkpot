@@ -369,7 +369,7 @@ void MyLibraryActivity::renderCombinedList() const {
 
   if (isSelectableIndex(selectorIndex)) {
     renderer.fillRect(0, CONTENT_START_Y + (selectorIndex - pageStartIndex) * LINE_HEIGHT - 2,
-                      pageWidth - RIGHT_MARGIN, LINE_HEIGHT, !darkMode);
+                      pageWidth - RIGHT_MARGIN, LINE_HEIGHT, darkMode);
   }
 
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
@@ -378,6 +378,7 @@ void MyLibraryActivity::renderCombinedList() const {
 
     if (item.type == LibraryItemType::Header) {
       renderer.drawText(UI_10_FONT_ID, LEFT_MARGIN, y, item.label, !darkMode, EpdFontFamily::BOLD);
+      // Draw separator line next to header text
       const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, item.label, EpdFontFamily::BOLD);
       const int lineStart = LEFT_MARGIN + textWidth + 10;
       if (lineStart < pageWidth - RIGHT_MARGIN) {
@@ -392,7 +393,7 @@ void MyLibraryActivity::renderCombinedList() const {
     }
 
     const bool isSelected = (i == selectorIndex);
-    const bool textColor = darkMode ? isSelected : !isSelected;
+    const bool textColor = !darkMode;
     if (item.type == LibraryItemType::Recent) {
       const auto& book = recentBooks[static_cast<size_t>(item.index)];
       std::string title = book.title;

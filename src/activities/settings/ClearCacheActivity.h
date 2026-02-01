@@ -17,6 +17,7 @@ class ClearCacheActivity final : public ActivityWithSubactivity {
   void onEnter() override;
   void onExit() override;
   void loop() override;
+  void requestScreenRefresh() override { updateRequired = true; }
 
  private:
   enum State { WARNING, CLEARING, SUCCESS, FAILED };

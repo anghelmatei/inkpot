@@ -237,13 +237,14 @@ void SettingsActivity::buildSettingsItems() {
   for (int i = 0; i < readerSettingsCount; i++) {
     settingsItems.push_back({SettingsItemType::Setting, nullptr, &readerSettings[i]});
   }
-  settingsItems.push_back({SettingsItemType::Header, "Controls", nullptr});
-  for (int i = 0; i < controlsSettingsCount; i++) {
-    settingsItems.push_back({SettingsItemType::Setting, nullptr, &controlsSettings[i]});
-  }
+  // System and Controls grouped together on page 2
   settingsItems.push_back({SettingsItemType::Header, "System", nullptr});
   for (int i = 0; i < systemSettingsCount; i++) {
     settingsItems.push_back({SettingsItemType::Setting, nullptr, &systemSettings[i]});
+  }
+  settingsItems.push_back({SettingsItemType::Header, "Controls", nullptr});
+  for (int i = 0; i < controlsSettingsCount; i++) {
+    settingsItems.push_back({SettingsItemType::Setting, nullptr, &controlsSettings[i]});
   }
 }
 

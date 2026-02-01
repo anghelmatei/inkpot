@@ -39,13 +39,16 @@ unsigned long firstTapTime = 0;
 bool waitingForSecondTap = false;  // True after first tap, waiting for potential second
 bool doubleTapFiredThisFrame = false;  // True if double-tap action fired this frame
 bool singleTapPendingThisFrame = false;  // True if deferred single-tap should fire this frame
+unsigned long doubleTapSuppressUntil = 0;  // Time until which to suppress single-tap actions after double-tap
 constexpr unsigned long DOUBLE_TAP_WINDOW_MS = 300;  // Max time between taps (reduced for faster response)
+constexpr unsigned long DOUBLE_TAP_SUPPRESS_MS = 500;  // Suppress single-tap for this long after double-tap
 
 // Call this from activities to check if power button release should be ignored
-// Returns true if the tap was consumed by double-tap logic (either double-tap fired, or first tap is deferred)
+// Returns true if the tap was consumed by double-tap logic (double-tap fired recently, or first tap is deferred)
 bool isPowerButtonConsumedByDoubleTap() {
-  // Consumed if: double-tap just fired, OR we're waiting for second tap (first tap is deferred)
-  return doubleTapFiredThisFrame || waitingForSecondTap;
+  const unsigned long now = millis();
+  // Consumed if: double-tap fired recently, OR we're waiting for second tap (first tap is deferred)
+  return (now < doubleTapSuppressUntil) || waitingForSecondTap;
 }
 
 // Call this to check if a deferred single-tap should now be processed
@@ -159,6 +162,14 @@ void enterNewActivity(Activity* activity) {
   currentActivity->onEnter();
 }
 
+void waitForPowerRelease() {
+  gpio.update();
+  while (gpio.isPressed(HalGPIO::BTN_POWER)) {
+    delay(50);
+    gpio.update();
+  }
+}
+
 // Verify power button press duration on wake-up from deep sleep
 // Pre-condition: isWakeupByPowerButton() == true
 void verifyPowerButtonDuration() {
@@ -182,6 +193,7 @@ void verifyPowerButtonDuration() {
   while (gpio.isPressed(HalGPIO::BTN_POWER) && gpio.getHeldTime() < requiredDuration) {
     delay(10);
     gpio.update();
+    yield();  // Allow other tasks to run (display refresh, etc.)
   }
 
   if (!gpio.isPressed(HalGPIO::BTN_POWER) || gpio.getHeldTime() < requiredDuration) {
@@ -190,15 +202,12 @@ void verifyPowerButtonDuration() {
     if (!gpio.isUsbConnected()) {
       gpio.startDeepSleep();
     }
+    return;
   }
-}
 
-void waitForPowerRelease() {
-  gpio.update();
-  while (gpio.isPressed(HalGPIO::BTN_POWER)) {
-    delay(50);
-    gpio.update();
-  }
+  // Button was held long enough - wait for it to be released before continuing
+  // This prevents the main activity from processing the held button as input
+  waitForPowerRelease();
 }
 
 // Enter deep sleep mode
@@ -393,18 +402,18 @@ void loop() {
   }
 
   // Double-tap power button detection
-  // Logic: First tap is deferred. If second tap comes within window, double-tap fires.
-  // If timeout expires without second tap, the deferred single-tap action fires.
+  // Tracks press events: first press starts timer, second press within window = double-tap
   doubleTapFiredThisFrame = false;
   singleTapPendingThisFrame = false;
   
   if (SETTINGS.doubleTapPwrBtn != CrossPointSettings::DT_IGNORE) {
-    if (gpio.wasReleased(HalGPIO::BTN_POWER)) {
-      const unsigned long now = millis();
-      
+    const unsigned long now = millis();
+    
+    if (gpio.wasPressed(HalGPIO::BTN_POWER)) {
       if (waitingForSecondTap && (now - firstTapTime) < DOUBLE_TAP_WINDOW_MS) {
-        // Second tap arrived within window - double-tap detected!
+        // Second press arrived within window - double-tap detected!
         doubleTapFiredThisFrame = true;
+        doubleTapSuppressUntil = now + DOUBLE_TAP_SUPPRESS_MS;  // Suppress single-tap for next 500ms
         waitingForSecondTap = false;
         firstTapTime = 0;
         
@@ -416,12 +425,13 @@ void loop() {
           }
         }
       } else {
-        // First tap - defer it and wait for possible second tap
+        // First press - start waiting for possible second tap
         waitingForSecondTap = true;
         firstTapTime = now;
       }
-    } else if (waitingForSecondTap && (millis() - firstTapTime) >= DOUBLE_TAP_WINDOW_MS) {
-      // Timeout expired without second tap - fire deferred single-tap action
+    } else if (waitingForSecondTap && (now - firstTapTime) >= DOUBLE_TAP_WINDOW_MS && !gpio.isPressed(HalGPIO::BTN_POWER)) {
+      // Timeout expired and button was released within window - fire deferred single-tap action
+      // Note: If button is still held, this is likely a shutdown hold, not a tap
       singleTapPendingThisFrame = true;
       waitingForSecondTap = false;
       firstTapTime = 0;

@@ -62,7 +62,7 @@ bool openCustomWallpaperFile(const size_t index, FsFile& file, std::string& file
   return SdMan.openFileForRead("WAL", filename, file);
 }
 
-void renderWallpaperBitmap(GfxRenderer& renderer, const Bitmap& bitmap, const bool crop, const uint8_t filter) {
+void renderWallpaperBitmap(GfxRenderer& renderer, const Bitmap& bitmap, const bool crop, const uint8_t filter, const bool displayAfterRender) {
   int x = 0;
   int y = 0;
   const auto pageWidth = renderer.getScreenWidth();
@@ -99,23 +99,34 @@ void renderWallpaperBitmap(GfxRenderer& renderer, const Bitmap& bitmap, const bo
   const bool hasGreyscale = bitmap.hasGreyscale() &&
                             filter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
 
+  // Check if we should invert for dark mode compatibility
+  // Invert dark images when in dark mode so they're visible
+  const bool shouldInvertForDarkMode = SETTINGS.readerDarkMode && !hasGreyscale;
+
   renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
 
+  // Apply filter-based inversion
   if (filter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
     renderer.invertScreen();
   }
+  // Apply dark mode inversion for predominantly dark bitmaps
+  else if (shouldInvertForDarkMode) {
+    // Only invert if the image appears to be predominantly dark (would be invisible on black background)
+    // For sleep screen covers, we assume book covers with dark artwork need inversion
+    renderer.invertScreen();
+  }
 
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  if (displayAfterRender) {
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  }
 
-  if (hasGreyscale) {
+  if (hasGreyscale && displayAfterRender) {
     bitmap.rewindToData();
-    renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
     renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
     renderer.copyGrayscaleLsbBuffers();
 
     bitmap.rewindToData();
-    renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
     renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
     renderer.copyGrayscaleMsbBuffers();
@@ -144,47 +155,53 @@ void renderBootWallpaper(GfxRenderer& renderer) {
   // Try to load user's custom wallpaper (same one used for sleep)
   FsFile file;
   std::string filename;
+  bool wallpaperLoaded = false;
 
   if (openCustomWallpaperFile(APP_STATE.lastSleepImage, file, filename)) {
     Bitmap bitmap(file, true);
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-      // Render using the shared bitmap renderer, but force crop=false and no filter for boot speed/simplicity
-      // Effectively doing what BootActivity did manually but reusing the core bitmap logic
-      // Note: BootActivity had specific simplified scaling logic which renderWallpaperBitmap covers largely
-      
-      // Using generic renderWallpaperBitmap to ensure consistent "fill" logic
-      // BootActivity's custom logic was:
-      // if (ratio > screenRatio) y = ...; else x = ...;
-      // renderWallpaperBitmap logic is almost identical for crop=false
-      
-      renderWallpaperBitmap(renderer, bitmap, false, CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
-      
+      // Render wallpaper WITHOUT displaying - we'll batch it with the popup
+      renderWallpaperBitmap(renderer, bitmap, false, CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER, false);
+      wallpaperLoaded = true;
       file.close();
-      renderPopup(renderer, "Opening...");
-      return;
+    } else {
+      file.close();
     }
-    file.close();
   }
 
-  // Fallback to sleep.bmp in root
-  if (SdMan.openFileForRead("BOOT", "/sleep.bmp", file)) {
+  // Fallback to sleep.bmp in root if custom wallpaper not loaded
+  if (!wallpaperLoaded && SdMan.openFileForRead("BOOT", "/sleep.bmp", file)) {
     Bitmap bitmap(file, true);
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-      renderWallpaperBitmap(renderer, bitmap, false, CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER);
+      renderWallpaperBitmap(renderer, bitmap, false, CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER, false);
+      wallpaperLoaded = true;
       file.close();
-      renderPopup(renderer, "Opening...");
-      return;
+    } else {
+      file.close();
     }
-    file.close();
   }
 
-  // No custom wallpaper found - just show popup over whatever is on screen
-  // (likely the sleep image that was rendered before sleep)
-  renderPopup(renderer, "Opening...");
+  // If no wallpaper loaded, screen still has whatever was there (sleep image or cleared)
+  // Now draw popup on top and do SINGLE display refresh
+  const char* message = "Opening...";
+  const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, message, EpdFontFamily::BOLD);
+  constexpr int margin = 20;
+  const int x = (renderer.getScreenWidth() - textWidth - margin * 2) / 2;
+  constexpr int y = 117;
+  const int w = textWidth + margin * 2;
+  const int h = renderer.getLineHeight(UI_12_FONT_ID) + margin * 2;
+
+  // Draw popup box with border directly (don't call renderPopup which does its own display)
+  renderer.fillRect(x - 5, y - 5, w + 10, h + 10, true);
+  renderer.fillRect(x + 5, y + 5, w - 10, h - 10, false);
+  renderer.drawText(UI_12_FONT_ID, x + margin, y + margin, message, true, EpdFontFamily::BOLD);
+
+  // Single display refresh for wallpaper + popup together
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
 void renderBootPopupOnly(GfxRenderer& renderer) {
-  // Logic derived from renderPopup but using partial window update
+  // Fast popup render for boot - uses FAST_REFRESH for minimal latency
   const char* message = "Opening...";
   const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, message, EpdFontFamily::BOLD);
   constexpr int margin = 20;
@@ -195,45 +212,15 @@ void renderBootPopupOnly(GfxRenderer& renderer) {
   const int w = textWidth + margin * 2;
   const int h = renderer.getLineHeight(UI_12_FONT_ID) + margin * 2;
 
-  // Visual bounds for the popup
-  int rx = x - 5;
-  int ry = y - 5;
-  int rw = w + 10;
-  int rh = h + 10;
-
-  // Alignment for partial update (EInkDisplay requires byte alignment)
-  // Portrait: y and h must be multiples of 8 (mapped to physical X)
-  // Landscape: x and w must be multiples of 8 (mapped to physical X)
-  const auto orientation = renderer.getOrientation();
+  // Clear only the popup area in shadow buffer (preserve rest of screen)
+  // This assumes the sleep wallpaper is still in the hardware display buffer
+  renderer.fillRect(x - 5, y - 5, w + 10, h + 10, false);  // Clear to white
   
-  // Clear the aligned area in the shadow buffer to white (0xFF)
-  // This ensures the background behind the popup is white for the partial update
-  renderer.clearScreen(0xFF); 
-
-  if (orientation == GfxRenderer::Portrait || orientation == GfxRenderer::PortraitInverted) {
-    // vertical logical orientation -> Logical Y maps to Physical X
-    // Align Logical Y and Height
-    const int rYAligned = ry & ~7;
-    const int rHAligned = (ry + rh + 7 & ~7) - rYAligned;
-    
-    // Re-draw the popup in the shadow buffer
-    renderer.fillRect(rx, ry, rw, rh, true);
-    renderer.fillRect(rx + 5, ry + 5, rw - 10, rh - 10, false);
-    renderer.drawText(UI_12_FONT_ID, x + margin, y + margin, message, true, EpdFontFamily::BOLD);
-    
-    // Display only the aligned window
-    // Restriction: In Portrait, Logical X has no alignment constraint, only Logical Y
-    renderer.displayWindow(rx, rYAligned, rw, rHAligned);
-  } else {
-    // horizontal logical orientation -> Logical X maps to Physical X
-    // Align Logical X and Width
-    const int rXAligned = rx & ~7;
-    const int rWAligned = (rx + rw + 7 & ~7) - rXAligned;
-    
-    renderer.fillRect(rx, ry, rw, rh, true);
-    renderer.fillRect(rx + 5, ry + 5, rw - 10, rh - 10, false);
-    renderer.drawText(UI_12_FONT_ID, x + margin, y + margin, message, true, EpdFontFamily::BOLD);
-    
-    renderer.displayWindow(rXAligned, ry, rWAligned, rh);
-  }
+  // Draw popup box with border
+  renderer.fillRect(x - 5, y - 5, w + 10, h + 10, true);   // Outer border (black)
+  renderer.fillRect(x + 5, y + 5, w - 10, h - 10, false);  // Inner area (white)
+  renderer.drawText(UI_12_FONT_ID, x + margin, y + margin, message, true, EpdFontFamily::BOLD);
+  
+  // Use FAST_REFRESH for quick display - we want the popup to appear ASAP
+  renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }
