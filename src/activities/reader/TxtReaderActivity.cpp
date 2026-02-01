@@ -15,6 +15,10 @@
 #include "ScreenComponents.h"
 #include "fontIds.h"
 
+// Defined in main.cpp - check if power button release was consumed by double-tap detection
+extern bool isPowerButtonConsumedByDoubleTap();
+extern bool shouldProcessDeferredSingleTap();
+
 namespace {
 constexpr unsigned long goHomeMs = 1000;
 constexpr int statusBarMargin = 25;
@@ -118,7 +122,9 @@ void TxtReaderActivity::loop() {
     return;
   }
 
-  const bool powerReleased = mappedInput.wasReleased(MappedInputManager::Button::Power);
+  // Power button: check for immediate release (when double-tap disabled) OR deferred single-tap (after timeout)
+  const bool powerReleased = (mappedInput.wasReleased(MappedInputManager::Button::Power) && !isPowerButtonConsumedByDoubleTap()) 
+                             || shouldProcessDeferredSingleTap();
   if (powerReleased && SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::ORIENTATION_CYCLE) {
     cycleOrientationPreservePosition();
     return;
@@ -188,6 +194,17 @@ void TxtReaderActivity::initializeReader() {
                                  SETTINGS.statusBar == CrossPointSettings::STATUS_BAR_MODE::ONLY_PROGRESS_BAR;
     orientedMarginBottom += statusBarMargin - cachedScreenMargin +
                             (showProgressBar ? (ScreenComponents::BOOK_PROGRESS_BAR_HEIGHT + progressBarMarginTop) : 0);
+  }
+
+  // Defensive: Ensure renderer orientation matches settings
+  if (SETTINGS.orientation == CrossPointSettings::ORIENTATION::PORTRAIT) {
+    renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  } else if (SETTINGS.orientation == CrossPointSettings::ORIENTATION::LANDSCAPE_CCW) {
+    renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
+  } else if (SETTINGS.orientation == CrossPointSettings::ORIENTATION::LANDSCAPE_CW) {
+    renderer.setOrientation(GfxRenderer::Orientation::LandscapeClockwise);
+  } else if (SETTINGS.orientation == CrossPointSettings::ORIENTATION::INVERTED) {
+    renderer.setOrientation(GfxRenderer::Orientation::PortraitInverted);
   }
 
   viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;

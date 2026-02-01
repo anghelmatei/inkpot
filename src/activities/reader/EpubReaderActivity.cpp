@@ -16,6 +16,10 @@
 #include "ScreenComponents.h"
 #include "fontIds.h"
 
+// Defined in main.cpp - check if power button release was consumed by double-tap detection
+extern bool isPowerButtonConsumedByDoubleTap();
+extern bool shouldProcessDeferredSingleTap();
+
 namespace {
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
 constexpr unsigned long skipChapterMs = 700;
@@ -174,7 +178,9 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  const bool powerReleased = mappedInput.wasReleased(MappedInputManager::Button::Power);
+  // Power button: check for immediate release (when double-tap disabled) OR deferred single-tap (after timeout)
+  const bool powerReleased = (mappedInput.wasReleased(MappedInputManager::Button::Power) && !isPowerButtonConsumedByDoubleTap()) 
+                             || shouldProcessDeferredSingleTap();
   if (powerReleased && SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::ORIENTATION_CYCLE) {
     cycleOrientationPreservePosition();
     return;
@@ -307,6 +313,17 @@ void EpubReaderActivity::renderScreen() {
   }
 
   if (!section) {
+    // Defensive: Ensure renderer orientation matches settings
+    if (SETTINGS.orientation == CrossPointSettings::ORIENTATION::PORTRAIT) {
+      renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+    } else if (SETTINGS.orientation == CrossPointSettings::ORIENTATION::LANDSCAPE_CCW) {
+      renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
+    } else if (SETTINGS.orientation == CrossPointSettings::ORIENTATION::LANDSCAPE_CW) {
+      renderer.setOrientation(GfxRenderer::Orientation::LandscapeClockwise);
+    } else if (SETTINGS.orientation == CrossPointSettings::ORIENTATION::INVERTED) {
+      renderer.setOrientation(GfxRenderer::Orientation::PortraitInverted);
+    }
+
     const auto filepath = epub->getSpineItem(currentSpineIndex).href;
     Serial.printf("[%lu] [ERS] Loading file: %s, index: %d\n", millis(), filepath.c_str(), currentSpineIndex);
     section = std::unique_ptr<Section>(new Section(epub, currentSpineIndex, renderer));

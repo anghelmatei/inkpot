@@ -23,4 +23,5 @@ class Activity {
   virtual void loop() {}
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
+  virtual void requestScreenRefresh() {}  // Override to handle external refresh requests (e.g., dark mode toggle)
 };

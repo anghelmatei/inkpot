@@ -313,9 +313,9 @@ void HomeActivity::render() {
 
   // --- Cover image area (no selection highlight, just displays the cover) ---
   const int coverWidth = pageWidth - 2 * margin;
-  const int coverHeight = pageHeight * 2 / 3;
+  const int coverHeight = pageHeight * 9 / 10;  // 90% of page height
   const int coverX = (pageWidth - coverWidth) / 2;
-  constexpr int coverY = 20;
+  constexpr int coverY = 6;  // Minimal top padding
 
   // For compatibility with existing cover rendering logic
   const int bookWidth = coverWidth;
@@ -510,14 +510,13 @@ void HomeActivity::render() {
     const auto labels = mappedInput.mapLabels("", "Select", "Up", "Down");
     renderer.drawButtonHints(UI_10_FONT_ID, labels.btn1, labels.btn2, labels.btn3, labels.btn4, !darkMode);
 
-    // Battery indicator aligned with reader status bar position
+    // Battery indicator - positioned same as reader status bar (above button hints)
     const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-    int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
-    renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
-                     &orientedMarginLeft);
-    const auto textY = pageHeight - orientedMarginBottom - 4;
-    ScreenComponents::drawBattery(renderer, orientedMarginLeft + 1, textY, showBatteryPercentage, !darkMode);
+    // Match reader status bar: orientedMarginBottom is ~19 for status bar, 4px from bottom margin
+    // Button hints area is about 40px, so position at 35px from bottom
+    constexpr int batteryMarginBottom = 30;
+    ScreenComponents::drawBattery(renderer, margin + 1, pageHeight - batteryMarginBottom, showBatteryPercentage, !darkMode);
 
   renderer.displayBuffer();
 }

@@ -413,6 +413,53 @@ void GfxRenderer::invertScreen() const {
 
 void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const { display.displayBuffer(refreshMode); }
 
+void GfxRenderer::displayWindow(const int x, const int y, const int width, const int height) const {
+  int rotatedX = 0;
+  int rotatedY = 0;
+  int rotatedW = 0;
+  int rotatedH = 0;
+
+  // Calculate rotated coordinates and dimensions based on orientation
+  switch (orientation) {
+    case Portrait:
+      // Logical (x, y) -> Physical (y, HEIGHT - x - width)
+      // Logical (w, h) -> Physical (h, w)
+      rotatedX = y;
+      rotatedY = HalDisplay::DISPLAY_HEIGHT - (x + width);
+      rotatedW = height;
+      rotatedH = width;
+      break;
+    case LandscapeClockwise:
+      // Logical (x, y) -> Physical (WIDTH - x - width, HEIGHT - y - height)
+      rotatedX = HalDisplay::DISPLAY_WIDTH - (x + width);
+      rotatedY = HalDisplay::DISPLAY_HEIGHT - (y + height);
+      rotatedW = width;
+      rotatedH = height;
+      break;
+    case PortraitInverted:
+      // Logical (x, y) -> Physical (WIDTH - y - height, x)
+      rotatedX = HalDisplay::DISPLAY_WIDTH - (y + height);
+      rotatedY = x;
+      rotatedW = height;
+      rotatedH = width;
+      break;
+    case LandscapeCounterClockwise:
+      // Logical (x, y) -> Physical (x, y)
+      rotatedX = x;
+      rotatedY = y;
+      rotatedW = width;
+      rotatedH = height;
+      break;
+  }
+
+  // Ensure positive/valid coordinates after rotation (just in case)
+  if (rotatedX < 0) rotatedX = 0;
+  if (rotatedY < 0) rotatedY = 0;
+
+  display.displayWindow(static_cast<uint16_t>(rotatedX), static_cast<uint16_t>(rotatedY),
+                        static_cast<uint16_t>(rotatedW), static_cast<uint16_t>(rotatedH));
+}
+
 std::string GfxRenderer::truncatedText(const int fontId, const char* text, const int maxWidth,
                                        const EpdFontFamily::Style style) const {
   std::string item = text;

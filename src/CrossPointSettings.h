@@ -94,6 +94,9 @@ class CrossPointSettings {
   // Short power button press actions
   enum SHORT_PWRBTN { IGNORE = 0, SLEEP = 1, PAGE_TURN = 2, ORIENTATION_CYCLE = 3, SHORT_PWRBTN_COUNT };
 
+  // Double-tap power button actions
+  enum DOUBLE_TAP_PWRBTN { DT_IGNORE = 0, DT_TOGGLE_DARK_MODE = 1, DOUBLE_TAP_PWRBTN_COUNT };
+
   // Hide battery percentage
   enum HIDE_BATTERY_PERCENTAGE { HIDE_NEVER = 0, HIDE_READER = 1, HIDE_ALWAYS = 2, HIDE_BATTERY_PERCENTAGE_COUNT };
 
@@ -111,6 +114,8 @@ class CrossPointSettings {
   uint8_t readerDarkMode = 0;
   // Short power button click behaviour
   uint8_t shortPwrBtn = IGNORE;
+  // Double-tap power button behaviour
+  uint8_t doubleTapPwrBtn = DT_IGNORE;
   // EPUB reading orientation settings
   // 0 = portrait (default), 1 = landscape clockwise, 2 = inverted, 3 = landscape counter-clockwise
   uint8_t orientation = PORTRAIT;

@@ -22,7 +22,7 @@ namespace {
 constexpr int SETTINGS_TOP_Y = 60;
 constexpr int LINE_HEIGHT = 30;
 
-constexpr int displaySettingsCount = 8;
+constexpr int displaySettingsCount = 7;
 const SettingInfo displaySettings[displaySettingsCount] = {
   SettingInfo::Toggle("Dark Mode", &CrossPointSettings::readerDarkMode),
     // Should match with SLEEP_SCREEN_MODE
@@ -33,12 +33,12 @@ const SettingInfo displaySettings[displaySettingsCount] = {
     SettingInfo::Action("Next Wallpaper"),
     SettingInfo::Enum("Status Bar", &CrossPointSettings::statusBar,
                       {"None", "No Progress", "Full w/ Percentage", "Full w/ Progress Bar", "Progress Bar"}),
-    SettingInfo::Enum("Hide Battery %", &CrossPointSettings::hideBatteryPercentage, {"Never", "In Reader", "Always"}),
-    SettingInfo::Enum("Refresh Frequency", &CrossPointSettings::refreshFrequency,
-                      {"1 page", "5 pages", "10 pages", "15 pages", "30 pages"})};
+    SettingInfo::Enum("Hide Battery %", &CrossPointSettings::hideBatteryPercentage, {"Never", "In Reader", "Always"})};
 
-constexpr int readerSettingsCount = 9;
+constexpr int readerSettingsCount = 10;
 const SettingInfo readerSettings[readerSettingsCount] = {
+    SettingInfo::Enum("Refresh Frequency", &CrossPointSettings::refreshFrequency,
+                      {"1 page", "5 pages", "10 pages", "15 pages", "30 pages"}),
     SettingInfo::Enum("Font Family", &CrossPointSettings::fontFamily, {"Bookerly", "Noto Sans", "Open Dyslexic"}),
     SettingInfo::Enum("Font Size", &CrossPointSettings::fontSize, {"Small", "Medium", "Large", "X Large"}),
     SettingInfo::Enum("Line Spacing", &CrossPointSettings::lineSpacing, {"Tight", "Normal", "Wide"}),
@@ -51,7 +51,7 @@ const SettingInfo readerSettings[readerSettingsCount] = {
     SettingInfo::Toggle("Extra Paragraph Spacing", &CrossPointSettings::extraParagraphSpacing),
     SettingInfo::Toggle("Text Anti-Aliasing", &CrossPointSettings::textAntiAliasing)};
 
-constexpr int controlsSettingsCount = 4;
+constexpr int controlsSettingsCount = 5;
 const SettingInfo controlsSettings[controlsSettingsCount] = {
     SettingInfo::Enum(
         "Front Button Layout", &CrossPointSettings::frontButtonLayout,
@@ -60,7 +60,9 @@ const SettingInfo controlsSettings[controlsSettingsCount] = {
                       {"Prev, Next", "Next, Prev"}),
     SettingInfo::Toggle("Long-press Chapter Skip", &CrossPointSettings::longPressChapterSkip),
   SettingInfo::Enum("Short Power Button Click", &CrossPointSettings::shortPwrBtn,
-            {"Ignore", "Sleep", "Page Turn", "Orientation Cycle"})};
+            {"Ignore", "Sleep", "Page Turn", "Orientation Cycle"}),
+  SettingInfo::Enum("Double-Tap Power Button", &CrossPointSettings::doubleTapPwrBtn,
+            {"Ignore", "Toggle Light/Dark"})};
 
 constexpr int systemSettingsCount = 5;
 const SettingInfo systemSettings[systemSettingsCount] = {
@@ -249,7 +251,8 @@ int SettingsActivity::getPageItems() const {
   const int screenHeight = renderer.getScreenHeight();
   const int bottomBarHeight = 60;
   const int availableHeight = screenHeight - SETTINGS_TOP_Y - bottomBarHeight;
-  int items = availableHeight / LINE_HEIGHT;
+  // Subtract 1 to account for header separator lines taking extra space
+  int items = (availableHeight / LINE_HEIGHT) - 1;
   if (items < 1) {
     items = 1;
   }
@@ -342,25 +345,45 @@ void SettingsActivity::render() const {
   int reservedTop = 0;
   int reservedBottom = 0;
   int visibleRows = 1;
+  
+  // Iterate to find stable pageStartIndex that keeps selectedItemIndex visible
+  // This handles the case where adjusting pageStartIndex changes visibleRows
+  for (int iteration = 0; iteration < 3; iteration++) {
+    std::tie(hasMoreAbove, hasMoreBelow, reservedTop, reservedBottom, visibleRows) = computeReservedRows(pageStartIndex);
+    
+    bool needsAdjustment = false;
+    if (selectedItemIndex < pageStartIndex) {
+      pageStartIndex = selectedItemIndex;
+      needsAdjustment = true;
+    } else if (selectedItemIndex >= pageStartIndex + visibleRows) {
+      pageStartIndex = selectedItemIndex - visibleRows + 1;
+      needsAdjustment = true;
+    }
+    
+    if (pageStartIndex < 0) {
+      pageStartIndex = 0;
+      needsAdjustment = true;
+    } else if (pageStartIndex > totalItems - 1) {
+      pageStartIndex = std::max(0, totalItems - 1);
+      needsAdjustment = true;
+    }
+    
+    if (!needsAdjustment) {
+      break;
+    }
+  }
+  
+  // Final computation after stable pageStartIndex
   std::tie(hasMoreAbove, hasMoreBelow, reservedTop, reservedBottom, visibleRows) = computeReservedRows(pageStartIndex);
 
-  // Keep the selected item within the visible rows (excluding the reserved "(more)" rows)
-  if (selectedItemIndex < pageStartIndex) {
-    pageStartIndex = selectedItemIndex;
-  } else if (selectedItemIndex >= pageStartIndex + visibleRows) {
-    pageStartIndex = selectedItemIndex - visibleRows + 1;
-  }
-  if (pageStartIndex < 0) {
-    pageStartIndex = 0;
-  } else if (pageStartIndex > totalItems - 1) {
-    pageStartIndex = std::max(0, totalItems - 1);
-  }
-
-  std::tie(hasMoreAbove, hasMoreBelow, reservedTop, reservedBottom, visibleRows) = computeReservedRows(pageStartIndex);
-
-  if (isSelectableIndex(selectedItemIndex)) {
+  // Calculate the row position for the selected item
+  // Items are rendered starting at row reservedTop, ending before row (pageItems - reservedBottom)
+  const int selectedRowInView = selectedItemIndex - pageStartIndex;
+  const bool selectedItemVisible = (selectedRowInView >= 0 && selectedRowInView < visibleRows);
+  
+  if (selectedItemVisible && isSelectableIndex(selectedItemIndex)) {
     renderer.fillRect(0,
-                      SETTINGS_TOP_Y + (selectedItemIndex - pageStartIndex + reservedTop) * LINE_HEIGHT - 2,
+                      SETTINGS_TOP_Y + (selectedRowInView + reservedTop) * LINE_HEIGHT - 2,
                       pageWidth - 1, LINE_HEIGHT, !darkMode);
   }
 
@@ -371,11 +394,15 @@ void SettingsActivity::render() const {
 
     if (item.type == SettingsItemType::Header) {
       renderer.drawText(UI_10_FONT_ID, 20, itemY, item.header, !darkMode, EpdFontFamily::BOLD);
-      const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, item.header, EpdFontFamily::BOLD);
-      const int lineStart = 20 + textWidth + 10;
-      if (lineStart < pageWidth - 20) {
-        renderer.drawLine(lineStart, itemY + 8, pageWidth - 20, itemY + 8, !darkMode);
-      }
+      // Draw separator line below the header text
+      const int lineY = itemY + LINE_HEIGHT - 2;
+      renderer.drawLine(20, lineY, pageWidth - 20, lineY, !darkMode);
+      continue;
+    }
+
+    if (item.type == SettingsItemType::Separator) {
+      // Draw separator text (like "(more)") without selection highlight
+      renderer.drawText(UI_10_FONT_ID, 20, itemY, item.header, !darkMode);
       continue;
     }
 
@@ -399,12 +426,20 @@ void SettingsActivity::render() const {
     }
   }
 
-  // Draw "(more)" indicators as reserved rows at first/last position of the page
+  // Draw "(more)" indicators with visual separators to make them clearly non-selectable
   if (hasMoreAbove) {
-    renderer.drawText(UI_10_FONT_ID, 20, SETTINGS_TOP_Y, "(more)", !darkMode);
+    const int moreY = SETTINGS_TOP_Y;
+    // Draw "(more)" text
+    renderer.drawText(UI_10_FONT_ID, 20, moreY, "(more)", !darkMode);
+    // Draw separator line below the "(more)" row - centered in the gap
+    const int lineY = moreY + LINE_HEIGHT - 2;
+    renderer.drawLine(20, lineY, pageWidth - 20, lineY, !darkMode);
   }
   if (hasMoreBelow) {
     const int lastRowY = SETTINGS_TOP_Y + (pageItems - 1) * LINE_HEIGHT;
+    // Draw separator line above the "(more)" row - centered in the gap
+    renderer.drawLine(20, lastRowY - 2, pageWidth - 20, lastRowY - 2, !darkMode);
+    // Draw "(more)" text
     renderer.drawText(UI_10_FONT_ID, 20, lastRowY, "(more)", !darkMode);
   }
 

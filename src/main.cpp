@@ -26,12 +26,32 @@
 #include "activities/util/FullScreenMessageActivity.h"
 #include "fontIds.h"
 #include "images/CrossLarge.h"
+#include "util/WallpaperUtils.h"
 
 HalDisplay display;
 HalGPIO gpio;
 MappedInputManager mappedInputManager(gpio);
 GfxRenderer renderer(display);
 Activity* currentActivity;
+
+// Double-tap detection state
+unsigned long firstTapTime = 0;
+bool waitingForSecondTap = false;  // True after first tap, waiting for potential second
+bool doubleTapFiredThisFrame = false;  // True if double-tap action fired this frame
+bool singleTapPendingThisFrame = false;  // True if deferred single-tap should fire this frame
+constexpr unsigned long DOUBLE_TAP_WINDOW_MS = 300;  // Max time between taps (reduced for faster response)
+
+// Call this from activities to check if power button release should be ignored
+// Returns true if the tap was consumed by double-tap logic (either double-tap fired, or first tap is deferred)
+bool isPowerButtonConsumedByDoubleTap() {
+  // Consumed if: double-tap just fired, OR we're waiting for second tap (first tap is deferred)
+  return doubleTapFiredThisFrame || waitingForSecondTap;
+}
+
+// Call this to check if a deferred single-tap should now be processed
+bool shouldProcessDeferredSingleTap() {
+  return singleTapPendingThisFrame;
+}
 
 // Fonts
 EpdFont bookerly14RegularFont(&bookerly_14_regular);
@@ -182,6 +202,7 @@ void waitForPowerRelease() {
 }
 
 // Enter deep sleep mode
+
 void enterDeepSleep() {
   exitActivity();
   enterNewActivity(new SleepActivity(renderer, mappedInputManager));
@@ -259,38 +280,7 @@ void setup() {
 
   gpio.begin();
 
-  // Initialize display early so we can provide immediate visual feedback
-  // while verifying the power button hold duration. Use a fast refresh
-  // to avoid the long HALF_REFRESH delay.
-  display.begin();
-  renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
-  renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
-  renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
-
-  if (gpio.isWakeupByPowerButton() && !gpio.isUsbConnected()) {
-    // Show a minimal "Opening..." indicator using FAST_REFRESH so user
-    // gets immediate feedback while we verify the hold duration.
-    const auto pageHeight = renderer.getScreenHeight();
-    renderer.clearScreen();
-    renderer.drawCenteredText(UI_12_FONT_ID, pageHeight / 2 - 10, "Opening...", true,
-                              EpdFontFamily::BOLD);
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-
-    Serial.printf("[%lu] [   ] Verifying power button press duration\n", millis());
-    verifyPowerButtonDuration();
-  }
-
-  // Only start serial if USB connected - reduced wait time
-  if (gpio.isUsbConnected()) {
-    Serial.begin(115200);
-    // Wait up to 500ms for Serial to be ready
-    unsigned long start = millis();
-    while (!Serial && (millis() - start) < 500) {
-      delay(10);
-    }
-  }
-
-  // Initialize display early to show boot screen ASAP
+  // Initialize display
   display.begin();
   renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
@@ -315,7 +305,34 @@ void setup() {
   SETTINGS.loadFromFile();
   APP_STATE.loadFromFile();
 
+  if (gpio.isWakeupByPowerButton() && !gpio.isUsbConnected()) {
+    // Show "Opening..." popup IMMEDIATELY so user sees feedback while holding button
+    // The wallpaper should still be on screen from sleep state
+    renderBootPopupOnly(renderer);
+
+    // Now verify power button duration (user sees popup while holding)
+    Serial.printf("[%lu] [   ] Verifying power button press duration\n", millis());
+    verifyPowerButtonDuration();
+  } else {
+    // Cold boot or other wake - force full wallpaper load
+    renderBootWallpaper(renderer);
+  }
+
+  // Only start serial if USB connected - reduced wait time
+  if (gpio.isUsbConnected()) {
+    Serial.begin(115200);
+    // Wait up to 500ms for Serial to be ready
+    unsigned long start = millis();
+    while (!Serial && (millis() - start) < 500) {
+      delay(10);
+    }
+  }
+
   // Now show boot screen with user's wallpaper + "Opening..." popup
+  // (Redundant call if we just woke up from power button, but safe and ensures state if woke from other sources)
+  // Or we can check if currentActivity is NOT set?
+  // Actually, BootActivity does nothing but show the screen.
+  // We can just enter it.
   enterNewActivity(new BootActivity(renderer, mappedInputManager));
 
   // Load remaining stores
@@ -343,8 +360,9 @@ void setup() {
     onGoToReader(path, MyLibraryActivity::Tab::Recent);
   }
 
-  // Ensure we're not still holding the power button before leaving setup
-  waitForPowerRelease();
+  // Note: We don't wait for power button release here anymore
+  // The BootActivity has already shown the popup, and the main activity
+  // will handle any lingering power button input appropriately
 }
 
 void loop() {
@@ -372,6 +390,42 @@ void loop() {
     enterDeepSleep();
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
     return;
+  }
+
+  // Double-tap power button detection
+  // Logic: First tap is deferred. If second tap comes within window, double-tap fires.
+  // If timeout expires without second tap, the deferred single-tap action fires.
+  doubleTapFiredThisFrame = false;
+  singleTapPendingThisFrame = false;
+  
+  if (SETTINGS.doubleTapPwrBtn != CrossPointSettings::DT_IGNORE) {
+    if (gpio.wasReleased(HalGPIO::BTN_POWER)) {
+      const unsigned long now = millis();
+      
+      if (waitingForSecondTap && (now - firstTapTime) < DOUBLE_TAP_WINDOW_MS) {
+        // Second tap arrived within window - double-tap detected!
+        doubleTapFiredThisFrame = true;
+        waitingForSecondTap = false;
+        firstTapTime = 0;
+        
+        if (SETTINGS.doubleTapPwrBtn == CrossPointSettings::DT_TOGGLE_DARK_MODE) {
+          SETTINGS.readerDarkMode = !SETTINGS.readerDarkMode;
+          SETTINGS.saveToFile();
+          if (currentActivity) {
+            currentActivity->requestScreenRefresh();
+          }
+        }
+      } else {
+        // First tap - defer it and wait for possible second tap
+        waitingForSecondTap = true;
+        firstTapTime = now;
+      }
+    } else if (waitingForSecondTap && (millis() - firstTapTime) >= DOUBLE_TAP_WINDOW_MS) {
+      // Timeout expired without second tap - fire deferred single-tap action
+      singleTapPendingThisFrame = true;
+      waitingForSecondTap = false;
+      firstTapTime = 0;
+    }
   }
 
   if (gpio.isPressed(HalGPIO::BTN_POWER) && gpio.getHeldTime() > SETTINGS.getPowerButtonDuration()) {

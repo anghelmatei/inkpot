@@ -19,7 +19,7 @@ class SettingsActivity final : public ActivityWithSubactivity {
   int selectedItemIndex = 0;
   const std::function<void()> onGoHome;
 
-  enum class SettingsItemType { Header, Setting };
+  enum class SettingsItemType { Header, Setting, Separator };
   struct SettingsItem {
     SettingsItemType type;
     const char* header;
