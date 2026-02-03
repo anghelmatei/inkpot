@@ -275,13 +275,27 @@ void XtcReaderActivity::renderPage() {
       }
     }
 
-    // Display BW with conditional refresh based on pagesUntilFullRefresh
+    // Refresh policy:
+    // - Light mode: unchanged (FAST most pages, periodic HALF refresh).
+    // - Dark mode: keep FAST for speed, but add an extra FAST pass periodically to reduce
+    //   cumulative ghosting without paying the cost of HALF refresh every page.
+    const bool darkMode = SETTINGS.readerDarkMode;
+    const int refreshFrequency = SETTINGS.getRefreshFrequency();
     if (pagesUntilFullRefresh <= 1) {
       renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+      pagesUntilFullRefresh = refreshFrequency;
     } else {
-      renderer.displayBuffer();
+      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
       pagesUntilFullRefresh--;
+
+      if (darkMode) {
+        constexpr int darkModeFastBoostEveryNPages = 3;
+        const int pagesSinceCleanRefresh = refreshFrequency - pagesUntilFullRefresh;
+        if (darkModeFastBoostEveryNPages > 0 && pagesSinceCleanRefresh > 0 &&
+            (pagesSinceCleanRefresh % darkModeFastBoostEveryNPages) == 0) {
+          renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+        }
+      }
     }
 
     // Pass 2: LSB buffer - mark DARK gray only (XTH value 1)
@@ -356,12 +370,23 @@ void XtcReaderActivity::renderPage() {
   // XTC pages already have status bar pre-rendered, no need to add our own
 
   // Display with appropriate refresh
+  const bool darkMode = SETTINGS.readerDarkMode;
+  const int refreshFrequency = SETTINGS.getRefreshFrequency();
   if (pagesUntilFullRefresh <= 1) {
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-    pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    pagesUntilFullRefresh = refreshFrequency;
   } else {
-    renderer.displayBuffer();
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     pagesUntilFullRefresh--;
+
+    if (darkMode) {
+      constexpr int darkModeFastBoostEveryNPages = 3;
+      const int pagesSinceCleanRefresh = refreshFrequency - pagesUntilFullRefresh;
+      if (darkModeFastBoostEveryNPages > 0 && pagesSinceCleanRefresh > 0 &&
+          (pagesSinceCleanRefresh % darkModeFastBoostEveryNPages) == 0) {
+        renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+      }
+    }
   }
 
   Serial.printf("[%lu] [XTR] Rendered page %lu/%lu (%u-bit)\n", millis(), currentPage + 1, xtc->getPageCount(),

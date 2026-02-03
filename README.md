@@ -7,7 +7,7 @@ This repository is my personal fork of the open-source community firmware **Cros
 ### Customizations in this Fork
 This fork introduces several quality-of-life improvements, UI enhancements, and hardware-specific optimizations designed to make the CrossPoint Reader more flexible and feature-rich.
 
-🌓 System-Wide Dark Mode
+### 🌓 System-Wide Dark Mode
 A comprehensive Dark Mode has been implemented across the entire OS.
 
 Global Toggle: Easily switch between light and dark themes in the Display settings.
@@ -16,7 +16,7 @@ Inverted Rendering: The EPUB and Text readers support full inversion, while UI e
 
 Web Integration: The internal web server interface (OPDS and File Transfer) now utilizes CSS variables to respect the user's system theme.
 
-⚡ Enhanced Power Button Gestures
+### ⚡Enhanced Power Button Gestures
 The power button has been expanded into a multi-action input tool to reduce reliance on front-facing buttons:
 
 Double-Tap: Toggle Dark Mode instantly from any screen.
@@ -25,12 +25,12 @@ Single-Tap Options: Configurable to either turn pages or cycle screen orientatio
 
 Fast Wake: Improved wake-up logic provides near-instant "Opening..." feedback, significantly reducing the perceived boot time.
 
-📖 Advanced Reader Capabilities
+### 📖 Advanced Reader Capabilities
 Reflow-Aware Rotation: Changing screen orientation now preserves your exact reading position by calculating the spine fraction and re-mapping it to the new layout.
 
 Viewport Caching: Layouts are cached per-resolution (e.g., 1024x758.bin vs 758x1024.bin), ensuring that switching between portrait and landscape is seamless and doesn't lose your place.
 
-🖼️ Wallpaper & Sleep Management
+### 🖼️ Wallpaper & Sleep Management
 Custom Wallpapers: Support for multiple user-provided wallpapers stored in the /sleep/ directory.
 
 Randomization: The device can pick a random wallpaper from your collection each time it enters sleep mode.
